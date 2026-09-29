@@ -139,6 +139,14 @@ private:
         TEST_CASE(valueType2);
 
         TEST_CASE(crash);
+        TEST_CASE(nullNodeInvalidLevel);
+    }
+
+    void nullNodeInvalidLevel() {
+        // a "<<<NULL>>>" line whose indentation maps to level 0 must not index tree[-1]
+        const char* clang = "`-FunctionDecl 0x1 <a.cpp:1:1, col:34> col:6 foo 'void ()'\n"
+                            "`-<<<NULL>>>\n";
+        ASSERT_EQUALS("void foo ( ) ;", parse(clang));
     }
 
     std::string parse(const char clang[]) {
