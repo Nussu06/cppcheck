@@ -431,6 +431,8 @@ std::string clangimport::AstNode::getSpelling() const
         if (typeIndex <= 0)
             return "";
     }
+    if (typeIndex <= 0)
+        return "";
     const std::string &str = mExtTokens[typeIndex - 1];
     if (startsWith(str,"col:"))
         return "";
