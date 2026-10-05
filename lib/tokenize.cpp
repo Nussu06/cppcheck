@@ -3201,8 +3201,15 @@ bool Tokenizer::simplifyUsing()
                 continue;
             }
 
-            // skip template definitions
             if (Token::Match(tok1, "template < !!>")) {
+                Token *paramsEnd = tok1->next()->findClosingBracket();
+                bool shadowed = !paramsEnd;
+                for (const Token *param = tok1->next(); !shadowed && param != paramsEnd; param = param->next())
+                    shadowed = param->str() == nameToken->str();
+                if (!shadowed) {
+                    tok1 = paramsEnd;
+                    continue;
+                }
                 Token *declEndToken = TemplateSimplifier::findTemplateDeclarationEnd(tok1);
                 if (declEndToken)
                     tok1 = declEndToken;
@@ -3774,7 +3781,8 @@ void Tokenizer::concatenateNegativeNumberAndAnyPositive()
         if (!tok->tokAt(2) || (tok->tokAt(2)->isOp() && !Token::Match(tok->tokAt(2), "[+-*]")))
             syntaxError(tok);
 
-        while (tok->str() != ">" && tok->next() && tok->strAt(1) == "+" && (!Token::Match(tok->tokAt(2), "%name% (|;") || Token::Match(tok, "%op%")))
+        while ((tok->isArithmeticalOp() || tok->isComparisonOp()) && tok->str() != ">" && tok->next() && tok->strAt(1) == "+" &&
+               (!Token::Match(tok->tokAt(2), "%name% (|;") || Token::Match(tok, "%op%")))
             tok->deleteNext();
 
         if (Token::Match(tok->next(), "+|- %num%")) {
@@ -4834,7 +4842,7 @@ void Tokenizer::setVarIdPass1()
 
             // parse anonymous namespaces as part of the current scope
             if (!Token::Match(startToken->previous(), "union|struct|enum|namespace {") &&
-                !(initlist && Token::Match(startToken->previous(), "%name%|>|>>|(") && Token::Match(startToken->link(), "} ,|{|)|..."))) {
+                !(initlist && Token::Match(startToken->previous(), "%name%|>|>>|(|,|{") && Token::Match(startToken->link(), "} ,|{|)|}|..."))) {
 
                 if (tok->str() == "{") {
                     bool isExecutable;
@@ -9108,7 +9116,8 @@ void Tokenizer::findGarbageCode() const
             if (tok->strAt(1) == "(")
                 syntaxError(tok);
             else if (!(tok->tokType() == Token::Type::eString && Token::simpleMatch(tok->tokAt(-1), "extern")) &&
-                     !(tok->tokType() == Token::Type::eBoolean && cpp && Token::simpleMatch(tok->tokAt(-1), "requires")))
+                     !(tok->tokType() == Token::Type::eBoolean && cpp && Token::simpleMatch(tok->tokAt(-1), "requires")) &&
+                     !Token::simpleMatch(tok->linkAt(1), "} ;"))
                 syntaxError(tok);
         }
         if (Token::Match(tok, "( ) %num%|%bool%|%char%|%str%"))
@@ -9165,9 +9174,21 @@ void Tokenizer::findGarbageCode() const
             syntaxError(tok);
         if (Token::Match(tok, "==|!=|<=|>= %comp%") && tok->strAt(-1) != "operator")
             syntaxError(tok, tok->str() + " " + tok->strAt(1));
-        if (Token::simpleMatch(tok, "::") && (!Token::Match(tok->next(), "%name%|*|~") ||
-                                              (tok->next()->isKeyword() && !Token::Match(tok->next(), "new|delete|operator"))))
-            syntaxError(tok);
+        if (Token::simpleMatch(tok, "::")) {
+            if (!Token::Match(tok->next(), "%name%|*|~") || (tok->next()->isKeyword() && !Token::Match(tok->next(), "new|delete|operator")))
+                syntaxError(tok);
+            if (Token::simpleMatch(tok->tokAt(-1), ")")) {
+                // NAME(...)::  => NAME is most likely an unknown macro
+                // other cases are valid, e.g. (void)::f(), return (T)::x, new (p) ::T, decltype(x)::type
+                const Token* const prev = tok->linkAt(-1)->tokAt(-1);
+                if (Token::Match(prev, "%name% (") && !prev->isKeyword() && prev->str() != "decltype") { // decltype is no keyword before C++11
+                    if (prev->isUpperCaseName())
+                        unknownMacroError(prev);
+                    else
+                        syntaxError(tok);
+                }
+            }
+        }
         if (Token::Match(tok, "& %comp%|&&|%oror%|&|%or%") && tok->strAt(1) != ">")
             syntaxError(tok);
         if (Token::Match(tok, "%comp%|&&|%oror%|&|%or% }") && tok->str() != ">")
@@ -10413,6 +10434,7 @@ void Tokenizer::simplifyBitfields()
         while (Token::Match(typeTok, "%name% :: %name%"))
             typeTok = typeTok->tokAt(2);
         if (Token::Match(typeTok, "%type% %name% :") &&
+            typeTok->str() != "enum" &&
             !Token::Match(tok->next(), "case|public|protected|private|class|struct") &&
             !Token::simpleMatch(tok->tokAt(2), "default :")) {
             Token *tok1 = typeTok->next();
@@ -10421,7 +10443,7 @@ void Tokenizer::simplifyBitfields()
                     tooLargeError(tok1->tokAt(2));
             if (tok1 && tok1->tokAt(2) &&
                 (Token::Match(tok1->tokAt(2), "%bool%|%num%") ||
-                 !Token::Match(tok1->tokAt(2), "public|protected|private| %type% ::|<|,|{|;"))) {
+                 !Token::Match(tok1->tokAt(2), "public|protected|private| %type% ::|<|,|{"))) {
                 while (tok1->next() && !Token::Match(tok1->next(), "[;,)]{}=]")) {
                     if (Token::Match(tok1->next(), "[([]"))
                         Token::eraseTokens(tok1, tok1->linkAt(1));
